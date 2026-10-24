@@ -251,7 +251,7 @@ class CNCProbe:
                 raise ValueError()
         except (ValueError, TypeError):
             raise gcmd.error("Invalid values: require START<END, SAFE_Z>Z and positive STEP, PROBE_DEPTH and F")
-        count = int(math.floor((end - start) / step)) + 1
+        count = int(math.ceil((end - start) / step)) + 1
         if count < 3:
             raise gcmd.error("CNC_FIND_ROTATION needs at least 3 sample points; increase span or reduce STEP")
         if count > 100:
@@ -277,8 +277,8 @@ class CNCProbe:
             target[axis_idx] += direction * depth
             hit = self._probe_target(gcmd, target, feed / 60., True, [probe_axis])
             # Probe offsets locate the actual contact point rather than the nozzle.
-            px = hit[xi] + ox
-            py = hit[yi] + oy
+            px = hit[xi] - gmove.base_position[xi] + ox
+            py = hit[yi] - gmove.base_position[yi] + oy
             points.append([px, py])
             self._retract_safe(gcmd, safe_z, feed)
         # Least-squares line y = slope*x + intercept. X samples are deliberately
