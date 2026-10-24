@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2021  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging, klippy
+import logging, klippy, math
 from gcode import GCodeDispatch, GCodeCommand
 from extras.homing import Homing
 from copy import copy
@@ -84,7 +84,8 @@ class GCodeMove:
         handlers = [
             'G1', 'G20', 'G21',
             'M82', 'M83', 'G90', 'G91', 'G92', 'M220', 'M221',
-            'SET_GCODE_OFFSET', 'SAVE_GCODE_STATE', 'RESTORE_GCODE_STATE'
+            'SET_GCODE_OFFSET', 'SAVE_GCODE_STATE', 'RESTORE_GCODE_STATE',
+            'G68', 'G69'
         ]
         # NOTE: this iterates over the commands above and finds the functions
         #       and description strings by their names (as they appear in "handlers").
@@ -118,6 +119,10 @@ class GCodeMove:
         #       used throughout Klipper.
         self.speed_factor = 1. / 60.
         self.extrude_factor = 1.
+        # G68 work-coordinate rotation: angle in radians, centre and offset in
+        # toolhead coordinates. The offset keeps the current physical position
+        # unchanged when rotation is enabled.
+        self.g68_rotation = None
 
         # G-Code state
         self.saved_states = {}
@@ -279,7 +284,16 @@ class GCodeMove:
         # NOTE: This is just a call to "toolhead.move", unless a
         #       move "transform" is in between (e.g. a bed mesh).
         logging.info(f"GCodeMove: G1 moving to '{self.last_position}' at speed: {self.speed}")
-        self.move_with_transform(self.last_position, self.speed)
+        move_position = list(self.last_position)
+        if self.g68_rotation is not None:
+            rot = self.g68_rotation
+            x_idx, y_idx = self.axis_map['X'], self.axis_map['Y']
+            dx = self.last_position[x_idx] - rot['center_x']
+            dy = self.last_position[y_idx] - rot['center_y']
+            c, sn = math.cos(rot['angle']), math.sin(rot['angle'])
+            move_position[x_idx] = rot['center_x'] + c * dx - sn * dy + rot['offset_x']
+            move_position[y_idx] = rot['center_y'] + sn * dx + c * dy + rot['offset_y']
+        self.move_with_transform(move_position, self.speed)
 
     # G-Code coordinate manipulation
     cmd_G20_help = "Set units to inches."
@@ -322,6 +336,45 @@ class GCodeMove:
                 self.base_position[pos_idx] = self.last_position[pos_idx] - offset
         if all([v is None for v in offsets]):
             self.base_position = list(self.last_position)
+
+    cmd_G68_help = "Rotate the XY work coordinate system (R in degrees, optional X/Y centre)."
+    def cmd_G68(self, gcmd):
+        if not self.is_printer_ready:
+            raise gcmd.error("G68 requires the printer to be ready")
+        if 'X' not in self.axis_map or 'Y' not in self.axis_map:
+            raise gcmd.error("G68 requires configured X and Y axes")
+        try:
+            angle_deg = gcmd.get_float('R')
+            if not math.isfinite(angle_deg):
+                raise ValueError()
+            x_idx, y_idx = self.axis_map['X'], self.axis_map['Y']
+            # X/Y are expressed in the current G-code coordinate system.
+            cx = gcmd.get_float('X', self.last_position[x_idx] - self.base_position[x_idx])
+            cy = gcmd.get_float('Y', self.last_position[y_idx] - self.base_position[y_idx])
+            cx += self.base_position[x_idx]
+            cy += self.base_position[y_idx]
+            if not math.isfinite(cx) or not math.isfinite(cy):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise gcmd.error("G68 requires finite numeric R and optional X/Y values")
+        angle = math.radians(angle_deg)
+        px, py = self.last_position[x_idx], self.last_position[y_idx]
+        dx, dy = px - cx, py - cy
+        c, sn = math.cos(angle), math.sin(angle)
+        rotated_x = cx + c * dx - sn * dy
+        rotated_y = cy + sn * dx + c * dy
+        self.g68_rotation = {
+            'angle': angle, 'center_x': cx, 'center_y': cy,
+            'offset_x': px - rotated_x, 'offset_y': py - rotated_y,
+        }
+        gcmd.respond_info("G68: XY work rotation enabled (R=%.6f deg, X=%.3f Y=%.3f)"
+                          % (angle_deg, cx - self.base_position[x_idx],
+                             cy - self.base_position[y_idx]))
+
+    cmd_G69_help = "Cancel G68 work-coordinate rotation."
+    def cmd_G69(self, gcmd):
+        self.g68_rotation = None
+        gcmd.respond_info("G69: XY work rotation cancelled")
 
     cmd_M114_help = "Get current position."
     def cmd_M114(self, gcmd):
@@ -385,6 +438,7 @@ class GCodeMove:
             'homing_position': list(self.homing_position),
             'speed': self.speed, 'speed_factor': self.speed_factor,
             'extrude_factor': self.extrude_factor,
+            'g68_rotation': copy(self.g68_rotation),
         }
 
     cmd_RESTORE_GCODE_STATE_help = "Restore a previously saved G-Code state"
@@ -401,6 +455,7 @@ class GCodeMove:
         self.speed = state['speed']
         self.speed_factor = state['speed_factor']
         self.extrude_factor = state['extrude_factor']
+        self.g68_rotation = copy(state.get('g68_rotation'))
         # Restore the relative E position ().
         # NOTE: The default behaviour is equivalent to a G92 using the saved position of the extruder.
         #       The purpose of it is unclear (added in commit c54b8da530dc724b129066d1f3a825226926c5e6).
