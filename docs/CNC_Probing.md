@@ -50,3 +50,41 @@ workpiece in the active work frame.
 The command does not automatically change G68, G92, tool offsets, or machine
 limits. It reports measured geometry only. Test the probing path and offset
 sign on a non-cutting setup before relying on the result.
+
+## Automatic angle detection from multiple edge touches
+
+Use `CNC_FIND_ROTATION` to probe multiple points along one approximately straight
+edge. It fits a least-squares line, reports every measured point, the fitted edge
+angle and fit RMS error, and can apply G68 automatically.
+
+```gcode
+G69
+CNC_FIND_ROTATION SIDE=Y_MIN X_START=20 X_END=220 OUTSIDE=10 Z=5 SAFE_Z=20 STEP=20 PROBE_DEPTH=5 F=60 APPLY=1
+```
+
+This example samples an edge at X=20, 40, ... 220 mm and probes from Y=10 mm
+toward +Y for at most 5 mm at each station. It therefore needs the selected
+Y_MIN edge to be just inside that small probe-depth window. For `SIDE=Y_MAX`,
+the probe moves toward -Y; for `SIDE=X_MIN`, it moves toward +X; for
+`SIDE=X_MAX`, it moves toward -X. For X sides, use `Y_START` and `Y_END`
+instead of X_START/X_END. Use at least three samples; STEP is the spacing in mm.
+The routine is limited to 100 samples per run.
+
+If `APPLY=1` (the default), it automatically issues `G68 R=<calculated angle>`.
+You can specify `CENTER_X=<x> CENTER_Y=<y>` to choose the G68 rotation centre;
+if omitted, the sample points' mean position is used. The fitted angle for a
+Y-side is the edge angle relative to machine X; for an X-side the command
+subtracts 90 degrees so that edge aligns with work Y.
+
+The command requires G68 to be inactive at the start (`G69` first), because
+the fit is performed in the unrotated machine XY frame. The resulting G68 is
+then enabled automatically if APPLY=1. The reported `fit RMS` is the residual
+distance from the fitted line; a large value suggests a damaged, curved, dirty,
+or incorrectly sampled edge. Inspect the reported points and RMS before cutting.
+
+The latest measurement is exposed by the Klipper object status for
+`cnc_probe.last_result` (including the points, angle, centre and fit RMS), so
+Moonraker clients can retrieve it without parsing console text. The console
+also prints the same values. A side touch is only safe if the probe/tool is
+designed for it and the supplied OUTSIDE/PROBE_DEPTH values bound the search;
+a failed sample may still move the full PROBE_DEPTH without triggering.
