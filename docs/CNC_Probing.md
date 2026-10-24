@@ -88,3 +88,8 @@ Moonraker clients can retrieve it without parsing console text. The console
 also prints the same values. A side touch is only safe if the probe/tool is
 designed for it and the supplied OUTSIDE/PROBE_DEPTH values bound the search;
 a failed sample may still move the full PROBE_DEPTH without triggering.
+
+
+## Runtime-editable wrapper macros
+
+For adjustable CNC wrappers that can be edited and reloaded without restarting Klipper, see [CNC_Dynamic_Macros.md](CNC_Dynamic_Macros.md) and [config/cnc_dynamic_macros.cfg](../config/cnc_dynamic_macros.cfg). These use the optional third-party DynamicMacros add-on. The in-memory probing result survives a macro-only reload, but not a Klipper restart.
