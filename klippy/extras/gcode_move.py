@@ -177,7 +177,15 @@ class GCodeMove:
     def _handle_home_rails_end(self, homing_state: Homing, rails):
         """Triggered by the home_rails method in homing.py after the homing moves complete"""
         self.reset_last_position()
-        for axis in homing_state.get_axes():
+        homed_axes = homing_state.get_axes()
+        # G28 runs in machine coordinates, outside GCodeMove's transform.
+        # Cancel G68 after X/Y homing so its old translation cannot send the
+        # next work-coordinate move to an incorrect physical location.
+        if 0 in homed_axes or 1 in homed_axes:
+            self.g68_rotation = None
+            for state in self.saved_states.values():
+                state['g68_rotation'] = None
+        for axis in homed_axes:
             self.base_position[axis] = self.homing_position[axis]
 
     def set_move_transform(self, transform, force=False):
