@@ -146,9 +146,13 @@ class CNCProbe:
             gcmd.respond_info("CNC_FIND_WORKPIECE: G68 rotation is active; probing in rotated work coordinates")
         xmid, ymid = (x_min + x_max) * 0.5, (y_min + y_max) * 0.5
 
-        # The search rectangle must surround the complete workpiece. Travel
-        # between sides is routed around the outside at SAFE_Z, never across
-        # the part at the side-probing height.
+        # Lift vertically first, then position at the outside search corner.
+        # Travel between sides is routed around the outside at SAFE_Z, never
+        # across the part at the side-probing height.
+        xi, yi = gmove.axis_map['X'], gmove.axis_map['Y']
+        current_x = gmove.last_position[xi] - gmove.base_position[xi]
+        current_y = gmove.last_position[yi] - gmove.base_position[yi]
+        self._move_work(gcmd, current_x, current_y, safe_z, feed)
         self._move_work(gcmd, x_min, y_min, safe_z, feed)
         self._move_work(gcmd, x_min, ymid, safe_z, feed)
         self._move_work(gcmd, x_min, ymid, probe_z, feed)
@@ -176,6 +180,7 @@ class CNCProbe:
         self._move_work(gcmd, xmid, y_min, safe_z, feed)
         self._move_work(gcmd, xmid, y_min, probe_z, feed)
         hit_near_y = self._probe_work(gcmd, 'Y', y_max, feed)
+        self._retract_safe(gcmd, safe_z, feed)
 
         # Convert trigger positions to work coordinates and compensate the
         # configured probe XY offset, rotated back into the active work frame.
