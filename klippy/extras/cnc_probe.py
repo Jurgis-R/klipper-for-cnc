@@ -107,6 +107,13 @@ class CNCProbe:
         finally:
             gmove.absolute_coord = old_absolute
 
+    def _retract_safe(self, gcmd, safe_z, feed_mm_min):
+        gmove, probe = self._objects(gcmd)
+        xi, yi, zi = (gmove.axis_map[a] for a in ('X', 'Y', 'Z'))
+        x = gmove.last_position[xi] - gmove.base_position[xi]
+        y = gmove.last_position[yi] - gmove.base_position[yi]
+        self._move_work(gcmd, x, y, safe_z, feed_mm_min)
+
     def _probe_work(self, gcmd, axis, target_value, feed_mm_min):
         gmove, probe = self._objects(gcmd)
         idx = gmove.axis_map[axis]
@@ -146,21 +153,24 @@ class CNCProbe:
         self._move_work(gcmd, x_min, ymid, safe_z, feed)
         self._move_work(gcmd, x_min, ymid, probe_z, feed)
         hit_left = self._probe_work(gcmd, 'X', x_max, feed)
-        # retract vertically, then route around the lower side to the opposite edge
-        self._move_work(gcmd, x_min, ymid, safe_z, feed)
+        # Retract vertically at the measured contact point, then route around
+        # the lower side to the opposite edge.
+        self._retract_safe(gcmd, safe_z, feed)
         self._move_work(gcmd, x_min, y_min, safe_z, feed)
         self._move_work(gcmd, x_max, y_min, safe_z, feed)
         self._move_work(gcmd, x_max, ymid, safe_z, feed)
         self._move_work(gcmd, x_max, ymid, probe_z, feed)
         hit_right = self._probe_work(gcmd, 'X', x_min, feed)
-        # Move around the right side before probing the far Y edge.
-        self._move_work(gcmd, x_max, ymid, safe_z, feed)
+        # Retract vertically at the contact point before routing around the
+        # right side to the far Y edge.
+        self._retract_safe(gcmd, safe_z, feed)
         self._move_work(gcmd, x_max, y_max, safe_z, feed)
         self._move_work(gcmd, xmid, y_max, safe_z, feed)
         self._move_work(gcmd, xmid, y_max, probe_z, feed)
         hit_far_y = self._probe_work(gcmd, 'Y', y_min, feed)
-        # Route around the left side to the near Y edge.
-        self._move_work(gcmd, xmid, y_max, safe_z, feed)
+        # Retract vertically at the contact point before routing around the
+        # left side to the near Y edge.
+        self._retract_safe(gcmd, safe_z, feed)
         self._move_work(gcmd, x_min, y_max, safe_z, feed)
         self._move_work(gcmd, x_min, y_min, safe_z, feed)
         self._move_work(gcmd, xmid, y_min, safe_z, feed)
