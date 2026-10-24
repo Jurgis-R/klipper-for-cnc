@@ -284,16 +284,24 @@ class GCodeMove:
         # NOTE: This is just a call to "toolhead.move", unless a
         #       move "transform" is in between (e.g. a bed mesh).
         logging.info(f"GCodeMove: G1 moving to '{self.last_position}' at speed: {self.speed}")
-        move_position = list(self.last_position)
-        if self.g68_rotation is not None:
-            rot = self.g68_rotation
-            x_idx, y_idx = self.axis_map['X'], self.axis_map['Y']
-            dx = self.last_position[x_idx] - rot['center_x']
-            dy = self.last_position[y_idx] - rot['center_y']
-            c, sn = math.cos(rot['angle']), math.sin(rot['angle'])
-            move_position[x_idx] = rot['center_x'] + c * dx - sn * dy + rot['offset_x']
-            move_position[y_idx] = rot['center_y'] + sn * dx + c * dy + rot['offset_y']
+        move_position = self._get_move_position(self.last_position)
         self.move_with_transform(move_position, self.speed)
+
+    def _get_move_position(self, position):
+        """Map a logical G-code target through the active G68 XY rotation."""
+        move_position = list(position)
+        if self.g68_rotation is None:
+            return move_position
+        rot = self.g68_rotation
+        x_idx, y_idx = self.axis_map['X'], self.axis_map['Y']
+        dx = position[x_idx] - rot['center_x']
+        dy = position[y_idx] - rot['center_y']
+        c, sn = math.cos(rot['angle']), math.sin(rot['angle'])
+        move_position[x_idx] = (rot['center_x'] + c * dx - sn * dy
+                                + rot['offset_x'])
+        move_position[y_idx] = (rot['center_y'] + sn * dx + c * dy
+                                + rot['offset_y'])
+        return move_position
 
     # G-Code coordinate manipulation
     cmd_G20_help = "Set units to inches."
@@ -425,7 +433,7 @@ class GCodeMove:
             speed = gcmd.get_float('MOVE_SPEED', self.speed, above=0.)
             for pos, delta in enumerate(move_delta):
                 self.last_position[pos] += delta
-            self.move_with_transform(self.last_position, speed)
+            self.move_with_transform(self._get_move_position(self.last_position), speed)
 
     cmd_SAVE_GCODE_STATE_help = "Save G-Code coordinate state"
     def cmd_SAVE_GCODE_STATE(self, gcmd):
